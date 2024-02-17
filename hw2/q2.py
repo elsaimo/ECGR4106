@@ -1,23 +1,27 @@
+
+# Import necessary libraries
 import torch
 import torchvision
 import torchvision.transforms as transforms
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as F  # Functional module for activation functions and more
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
 class BasicBlock(nn.Module):
-    expansion = 1
+    expansion = 1  # Expansion factor to adjust the number of output channels if needed
 
-    def __init__(self, in_channels, out_channels, stride=1, dropout_prob=0.5):
+    def __init__(self, in_channels, out_channels, stride=1):
         super(BasicBlock, self).__init__()
+        # First convolutional layer of the block
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(out_channels)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn2 = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout(dropout_prob)  # Dropout layer
+        self.bn1 = nn.BatchNorm2d(out_channels)  # Batch normalization after the first convolution
 
+        # Second convolutional layer of the block
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(out_channels)  # Batch normalization after the second convolution
+
+        # Shortcut connection to match input and output dimensions if necessary
         self.shortcut = nn.Sequential()
         if stride != 1 or in_channels != self.expansion * out_channels:
             self.shortcut = nn.Sequential(
@@ -26,69 +30,64 @@ class BasicBlock(nn.Module):
             )
 
     def forward(self, x):
-        identity = x
-
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-
-        out = self.conv2(out)
-        out = self.bn2(out)
-        out = self.dropout(out)  # Droupout layer
-
-        if self.shortcut:
-            identity = self.shortcut(x)
-
-        out += identity
-        out = self.relu(out)
-
+        # Forward pass through the first convolution, batch norm, and ReLU activation
+        out = F.relu(self.bn1(self.conv1(x)))
+        # Forward pass through the second convolution and batch norm
+        out = self.bn2(self.conv2(out))
+        # Adding the shortcut connection's output to the main path's output
+        out += self.shortcut(x)
+        # Final ReLU activation after adding the shortcut
+        out = F.relu(out)
         return out
 
 class ResNet11(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10, dropout_prob = 0.5):
+    def __init__(self, block, num_blocks, num_classes=10):
         super(ResNet11, self).__init__()
-        self.in_channels = 64
+        self.in_channels = 64  # Initial number of input channels
 
+        # Initial convolutional layer before entering the residual blocks
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.bn1 = nn.BatchNorm2d(64)
-        self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout()  # Dropout layer
+        self.bn1 = nn.BatchNorm2d(64)  # Batch normalization after the initial convolution
 
-        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1, dropout_prob=dropout_prob)
-        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2, dropout_prob=dropout_prob)
-        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2, dropout_prob=dropout_prob)
-        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2, dropout_prob=dropout_prob)
+        # Creating layers of blocks with increasing channel sizes
+        self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
+        self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
+        self.layer3 = self._make_layer(block, 256, num_blocks[2], stride=2)
+        self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
 
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        # Final fully connected layer for classification
         self.linear = nn.Linear(512 * block.expansion, num_classes)
 
-    def _make_layer(self, block, out_channels, num_blocks, stride, dropout_prob):
-        strides = [stride] + [1] * (num_blocks - 1)
+    def _make_layer(self, block, out_channels, num_blocks, stride):
+        # Helper function to create a layer with specified blocks
+        strides = [stride] + [1]*(num_blocks-1)  # First block could have a stride and the rest have stride of 1
         layers = []
         for stride in strides:
-            layers.append(block(self.in_channels, out_channels, stride, dropout_prob))
-            self.in_channels = out_channels * block.expansion
+            layers.append(block(self.in_channels, out_channels, stride))
+            self.in_channels = out_channels * block.expansion  # Update in_channels for the next block
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
-        out = self.dropout(out) # Dropout layer
-
+        # Forward pass through the initial convolution, batch norm, and ReLU activation
+        out = F.relu(self.bn1(self.conv1(x)))
+        # Forward pass through all the layers of blocks
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
         out = self.layer4(out)
-
-        out = self.avgpool(out)
-        out = out.view(out.size(0), -1)
-        out = self.linear(out)
+        # Global average pooling before the final layer
+        out = F.avg_pool2d(out, 4)
+        out = out.view(out.size(0), -1)  # Flatten the output for the fully connected layer
+        out = self.linear(out)  # Final classification layer
         return out
 
+#ResNet11:have 11 layers in total, including convolutional and fully connected layers.
+#it could have 4 residual blocks with a varying number of convolutional layers in each block to make up a total of 11 layers.
+
 # Example of using the ResNet11 model
-model = ResNet11(BasicBlock, [1, 1, 1, 1], num_classes=10, dropout_prob=0.5)  # 4 blocks with 1 layer each
+model = ResNet11(BasicBlock, [1, 1, 1, 1], num_classes=10)  # 4 blocks with 1 layer each
 print(model)
+
 
 # Check if GPU is available and set the device accordingly
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -113,7 +112,9 @@ testloader = torch.utils.data.DataLoader(testset, batch_size=32,
 # Define the network, loss function, and optimizer
 net = model.to(device)
 criterion = nn.CrossEntropyLoss()
+
 optimizer = optim.Adam(net.parameters(), lr=0.001)
+#optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
 # Lists for storing loss values and validation accuracy
 train_loss_list = []
@@ -121,9 +122,9 @@ val_loss_list = []
 val_accuracy_list = []
 
 # Training and validation loop
-for epoch in range(10):
+for epoch in range(10):  # loop over the dataset multiple times
     running_loss = 0.0
-    net.train()
+    net.train()  # Set the model to training mode
     for i, data in enumerate(trainloader, 0):
         inputs, labels = data[0].to(device), data[1].to(device)
         optimizer.zero_grad()
@@ -134,10 +135,11 @@ for epoch in range(10):
         running_loss += loss.item()
     train_loss_list.append(running_loss / len(trainloader))
 
+    # Validation loop
     running_loss = 0.0
     correct = 0
     total = 0
-    net.eval()
+    net.eval()  # Set the model to evaluation mode
     with torch.no_grad():
         for data in testloader:
             images, labels = data[0].to(device), data[1].to(device)
